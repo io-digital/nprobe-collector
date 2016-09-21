@@ -1,4 +1,4 @@
-package processor
+package main
 
 import (
 	"log"
@@ -8,6 +8,7 @@ import (
 	"time"
 	"github.com/jinzhu/now"
 	"net"
+	"net/rpc"
 	"strings"
 	"sync"
 	"io/ioutil"
@@ -15,6 +16,15 @@ import (
 	"github.com/io-digital/nprobe-collector/structure"
 	"github.com/io-digital/nprobe-collector/function"
 )
+
+type Listener int
+
+func (l *Listener) GetLine(line []byte, ack *bool) error {
+	fmt.Println(string(line))
+	return nil
+}
+
+
 
 type Configuration struct {
     DbUser string
@@ -45,7 +55,7 @@ func getNProbeDB() (*sql.DB) {
 
 		fmt.Println("Opening nProbe DB")
 
-		configValues, err := ioutil.ReadFile("../processor/bandwidthBar/nprobe_db_conf.json")
+		configValues, err := ioutil.ReadFile("../config/nprobe_db_conf.json")
 
 		if err != nil {
 	        fmt.Println("error:", err)
@@ -80,7 +90,10 @@ func getBBarDB() (*sql.DB) {
 
 		fmt.Println("Opening BBAR DB")
 
-		configValues, err := ioutil.ReadFile("../processor/bandwidthBar/bbar_db_conf.json")
+		//configValues := function.ParseConfiguration()
+		//fmt.Println(configValues)
+
+		configValues, err := ioutil.ReadFile("../config/bbar_db_conf.json")
 
 		if err != nil {
 	        fmt.Println("error:", err)
@@ -186,9 +199,25 @@ func getIpAddressServiceIdMap() map[string]int {
 	return returnMap
 }
 
-func Initialize(){
 
-	getBBarDB()
+func init(){
+	
+	fmt.Println("init")
+	addy, err := net.ResolveTCPAddr("tcp", "0.0.0.0:42586")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	inbound, err := net.ListenTCP("tcp", addy)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	listener := new(Listener)
+	rpc.Register(listener)
+	rpc.Accept(inbound)
+	
+	/*getBBarDB()
 	getNProbeDB()
 
 	go func() {
@@ -199,6 +228,7 @@ func Initialize(){
 		    <-t.C
 		}
 	}()
+	*/
 }
 
 func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[string][]byte){
@@ -219,7 +249,6 @@ func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[s
 	dataBufferLock.Unlock()
 
 	for _, packet := range readBuffer {
-	//for _, packet := range dataBuffer {
 
 		userIp = ""
 
@@ -276,5 +305,26 @@ func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[s
 	}
 
 	tx.Commit()
+}
+
+func main(){
+
+	/*
+	addy, err := net.ResolveTCPAddr("tcp", "0.0.0.0:42586")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	inbound, err := net.ListenTCP("tcp", addy)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	listener := new(Listener)
+	rpc.Register(listener)
+	rpc.Accept(inbound)
+	*/
+
+	//for {}
 }
 

@@ -1,57 +1,44 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"math"
 	"time"
-	"sync"
+	"strconv"
 	"github.com/io-digital/nprobe-collector/structure"
 	"github.com/io-digital/nprobe-collector/function"
-	"github.com/io-digital/nprobe-collector/processor/bandwidthBar"
+	"github.com/io-digital/nprobe-collector/processor/ap3k"
 )
 
 var (
 	debugMode bool
-	dataBuffer []map[string][]byte
+	port string
+
 	dataTemplates = make(map[uint16]map[string][]uint16)
 	optionTemplates = make(map[uint16]map[string][]uint16)
 	packetCount = 0
+
+	udpBufferChan = make(chan []byte)
+	flowSetRecordChan = make(chan structure.FlowSetRecord)
+	dataBufferChan = make(chan []map[string][]byte)
+	templateNotFoundChan = make(chan int)
+
 	flowSetHeaderReadDone = make(chan bool)
 	flowSetRecordReadDone = make(chan bool)
-	dataBufferFull = make(chan bool)
 	optionDataBufferFull = make(chan bool)
-	flowSetRecord []byte
-	dataBufferLock sync.Mutex
 )
 
-func readFlowSetHeader(reader *bufio.Reader, flowSetHeaderSlice []byte, flowSetHeaderStruct *structure.FlowSetHeader/*, done chan bool*/) {
+func readFlowSetHeader(udpBuffer []byte, flowSetHeaderStruct *structure.FlowSetHeader) {
 
-	flowSetHeaderSlice = nil
+	flowSetHeader := udpBuffer[0:20]
 
-	for i := 0; i < 20; {
-		newByte, err := reader.ReadByte()
-
-		if err == nil {
-			flowSetHeaderSlice = append(flowSetHeaderSlice, newByte)
-			i++
-
-		} else if err == io.EOF {
-			fmt.Printf("Number of Packets: %d\n", packetCount)
-			log.Fatalf("Unexpected Error: %s", err)
-		} else {
-			fmt.Println("Waiting for data")
-		}
-	}
-
-	flowSetHeaderStruct.Version = function.ReadUint16(flowSetHeaderSlice[0:2])
-	flowSetHeaderStruct.Records = function.ReadUint16(flowSetHeaderSlice[2:4])
-	flowSetHeaderStruct.SystemUptime = function.ReadUint32(flowSetHeaderSlice[4:8])
-	flowSetHeaderStruct.Timestamp =  time.Unix(int64(function.ReadUint32(flowSetHeaderSlice[8:12])), 0)
+	flowSetHeaderStruct.Version = function.ReadUint16(flowSetHeader[0:2])
+	flowSetHeaderStruct.Records = function.ReadUint16(flowSetHeader[2:4])
+	flowSetHeaderStruct.SystemUptime = function.ReadUint32(flowSetHeader[4:8])
+	flowSetHeaderStruct.Timestamp =  time.Unix(int64(function.ReadUint32(flowSetHeader[8:12])), 0)
 
 	if debugMode {
 		fmt.Printf("FlowSet Header: NetFlow Version = %d, Number of Packets = %d, Time = %s \n", flowSetHeaderStruct.Version, flowSetHeaderStruct.Records, flowSetHeaderStruct.Timestamp)
@@ -63,43 +50,25 @@ func readFlowSetHeader(reader *bufio.Reader, flowSetHeaderSlice []byte, flowSetH
 		fmt.Printf("Records processed: %d\n", packetCount)
 	}
 
-	//done <- true
-	flowSetHeaderReadDone <- true
+	udpBufferChan <- udpBuffer[20:]
 }
 
-func readFlowSetRecord(reader *bufio.Reader, flowSetRecord *[]byte) {
-
-	flowSetIdLength, err := reader.Peek(4)
-
-	if err != nil {
-		log.Fatalf("Unexpected Error: %s", err)
-	}
-
-	flowSetLength := int(function.ReadUint16(flowSetIdLength[2:4]))
-
-	if debugMode {
-		fmt.Printf("FlowSet Record: FlowSetId = %d, Length = %d\n", function.ReadUint16(flowSetIdLength[0:2]), flowSetLength)
-	}
-
-	for i := 0; i < flowSetLength; {
-
-		newByte, err := reader.ReadByte()
-
-		if err == nil {
-			*flowSetRecord = append(*flowSetRecord, newByte)
-			i++
-		} else if debugMode {
-			fmt.Println("Waiting for data")
-		}
-	}
-
-	//done <- true
-	flowSetRecordReadDone <- true
+func readFlowSetRecord(udpBuffer []byte) {
+	flowSetIdLength := udpBuffer[0:4]
+	flowSetRecord := structure.FlowSetRecord{Id: function.ReadUint16(flowSetIdLength[0:2]),Length: function.ReadUint16(flowSetIdLength[2:4]), Data: udpBuffer[4:]}
+	flowSetRecordChan <- flowSetRecord
 }
 
-func parseFlowSetTemplate(flowSetTemplate []byte) {
+func parseFlowSetTemplate(flowSetRecord structure.FlowSetRecord) {
 
-	templates := flowSetTemplate[4:]
+	readToCollectData := false
+
+	if len(dataTemplates) == 0 {
+		readToCollectData = true
+		fmt.Println("NetFlow Templates found, loading...")
+	}
+
+	templates :=  flowSetRecord.Data
 
 	for len(templates) > 0 {
 
@@ -121,16 +90,26 @@ func parseFlowSetTemplate(flowSetTemplate []byte) {
 			templates = templates[4:]
 		}
 
+		_, templateExists := dataTemplates[templateId]
+
+		if !templateExists {
+			fmt.Println("Loaded Template ID: ", templateId)
+		}
+
 		dataTemplates[templateId] = map[string][]uint16{
 			"fieldTypeIndex": fieldTypeIndex,
 			"fieldLength":    fieldLength,
 		}
 	}
+
+	if readToCollectData {
+		fmt.Println("Now collecting data")
+	}
 }
 
-func parseFlowSetOptions(flowSetOptions []byte) {
+func parseFlowSetOptions(flowSetRecord structure.FlowSetRecord) {
 
-	template := flowSetOptions[4:]
+	template := flowSetRecord.Data
 	templateId := function.ReadUint16(template[0:2])
 	optionScopeLength := int(function.ReadUint16(template[2:4]))/4
 	optionLength := int(function.ReadUint16(template[4:6]))/4
@@ -169,9 +148,11 @@ func parseFlowSetOptions(flowSetOptions []byte) {
 	}
 }
 
-func parseFlowSetData(flowSetData []byte) {
+func parseFlowSetData(flowSetRecord structure.FlowSetRecord) {
 
-	templateId := function.ReadUint16(flowSetData[0:2])
+	flowSetData := flowSetRecord.Data
+	templateId := flowSetRecord.Id
+
 	dataTemplate, dataTemplateExists := dataTemplates[templateId]
 	optionTemplate, optionTemplateExists := optionTemplates[templateId]
 
@@ -182,10 +163,9 @@ func parseFlowSetData(flowSetData []byte) {
 			fmt.Println("------------------------------------------------------------------------")
 		}
 
-		fieldValues := flowSetData[4:]
+		fieldValues := flowSetData 
 
-		dataBufferLock.Lock()
-		dataBuffer = nil
+		dataBuffer := make([]map[string][]byte, 0)
 
 		for len(fieldValues) >= 4 {
 
@@ -195,6 +175,11 @@ func parseFlowSetData(flowSetData []byte) {
 
 				fieldMapIndex := dataTemplate["fieldTypeIndex"][index]
 				fieldName := structure.NetFlowFieldTypes[fieldMapIndex]
+
+				if fieldName == "" {
+					fieldName = strconv.Itoa(int(fieldMapIndex))
+				}
+
 				fieldValue := fieldValues[0:fieldLength]
 
 				packet[fieldName] = fieldValue
@@ -212,9 +197,7 @@ func parseFlowSetData(flowSetData []byte) {
 			}
 		}
 
-		dataBufferLock.Unlock()
-		//data buffer is full for this flowset
-		dataBufferFull <- true
+		dataBufferChan <- dataBuffer
 
 	} else if optionTemplateExists {
 
@@ -258,81 +241,97 @@ func parseFlowSetData(flowSetData []byte) {
 
 	} else {
 
-		fmt.Printf("templateId %d not found\n", templateId)
+		templateNotFoundChan <- int(templateId)
 	}
 }
 
 func processFlowSetData(flowSetHeaderStruct structure.FlowSetHeader, fullBuffer []map[string][]byte) {
-	processor.ProcessData(flowSetHeaderStruct, /*dataBuffer*/fullBuffer)
+	processor.ProcessData(flowSetHeaderStruct, fullBuffer)
 }
+
 
 func main() {
 
 	debugPtr := flag.Bool("debug", false, "Outputs data as it is received")
+	portPtr := flag.String("port", "2055", "The port that the server listens on")
 	flag.Parse()
 
 	debugMode = *debugPtr
+	port = *portPtr
 
-	fmt.Println("Launching server...")
+	fmt.Println("Launching UDP server...")
+	udpAddr, err := net.ResolveUDPAddr("udp4", ":"+port)
 
-	//Initialize processor 
+	if err != nil {
+         log.Fatal(err)
+ 	}
+
+ 	reader, err := net.ListenUDP("udp4", udpAddr)
+	reader.SetReadBuffer(1048576)
+
+	if err != nil {
+		log.Fatalf("UDP Error: %s", err)
+	}
+
+	fmt.Println("UDP server up and listening on port 2055")
+    defer reader.Close()
+
 	processor.Initialize()
 
+	fmt.Println("Waiting for NetFlow Template(s)...")
 
-	flowSetHeaderSlice := make([]byte, 20)
 	flowSetHeader := structure.FlowSetHeader{}
-
-	ln, err := net.Listen("tcp", ":2055")
-
-	if err != nil {
-		log.Fatalf("TCP Error: %s", err)
-	}
-
-	conn, err := ln.Accept()
-
-	if err != nil {
-		log.Fatalf("Connection Accept Error: %s", err)
-	}
-
-	reader := bufio.NewReader(conn)
-
-	fmt.Println("Listening on and accepting connections on port 2055...")
 
 	for {
 
-		go readFlowSetHeader(reader, flowSetHeaderSlice, &flowSetHeader)
-		<-flowSetHeaderReadDone
+		udpBuffer := make([]byte, 1048576)
+		n, _, err := reader.ReadFromUDP(udpBuffer)
 
-		for flowSetRecordCounter := 0; flowSetRecordCounter < int(flowSetHeader.Records); flowSetRecordCounter++ {
+		if err != nil {
+        	log.Fatal(err)
+ 		}
+		
+		udpBuffer = udpBuffer[0:n]
 
-			flowSetRecord = nil
+		if debugMode {
+        	fmt.Println("UDP Read Length: ", len(udpBuffer))
+        }
 
-			go readFlowSetRecord(reader, &flowSetRecord)
-			<-flowSetRecordReadDone
+		go readFlowSetHeader(udpBuffer, &flowSetHeader)
+		udpBuffer = <-udpBufferChan
 
-			flowSetId := function.ReadUint16(flowSetRecord)
+		go readFlowSetRecord(udpBuffer)
+		flowSetRecord := <-flowSetRecordChan
+		 
+		if debugMode {
+			fmt.Printf("FlowSet Record: FlowSetId = %d, Length = %d\n", flowSetRecord.Id, flowSetRecord.Length)
+		}
 
-			switch flowSetId {
+		switch flowSetRecord.Id {
 
-			case 0:
-				parseFlowSetTemplate(flowSetRecord)
-			case 1:
-				parseFlowSetOptions(flowSetRecord)
-			default:
+		case 0:
+			parseFlowSetTemplate(flowSetRecord)
+		case 1:
+			parseFlowSetOptions(flowSetRecord)
+		default:
+			go parseFlowSetData(flowSetRecord)
 
-				go parseFlowSetData(flowSetRecord)
+			select {
+	        case fullBuffer := <-dataBufferChan:
 
-				select {
-		        case <-dataBufferFull:
-		            
-		            fullBuffer := dataBuffer
-		            go processFlowSetData(flowSetHeader, fullBuffer)
+	            go processFlowSetData(flowSetHeader, fullBuffer)
 
-		        case <-optionDataBufferFull:
-		            
-		            //skryf data
-		        }
-			}
+	        case <-optionDataBufferFull:
+	            
+	            if debugMode {
+	            	fmt.Println("Option Buffer full")
+	            }
+
+	        case templateId := <- templateNotFoundChan:
+	        	if debugMode {
+	        		fmt.Println("Template not found, ID: ", templateId)
+	        	}
+	        }
 		}
 	}
 }

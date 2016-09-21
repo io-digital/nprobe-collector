@@ -30,3 +30,8 @@ func ReadUint64(data []byte) (ret uint64) {
 	binary.Read(buf, binary.BigEndian, &ret)
 	return
 }
+
+func ParseConfiguration() (string){
+
+	return "test"
+}
