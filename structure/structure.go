@@ -16,6 +16,12 @@ type ProcessorConfiguration struct {
 	Name string
 	Location string
 	TcpPort string
+	ConnectionAttempts int
+}
+
+type ProcessingFuncArgs struct {
+	FlowSetHeaderStruct FlowSetHeader
+	DataBuffer []map[string][]byte
 }
 
 type FlowSetHeader struct {

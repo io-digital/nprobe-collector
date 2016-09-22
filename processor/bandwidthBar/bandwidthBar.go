@@ -15,16 +15,10 @@ import (
 	"encoding/json"
 	"github.com/io-digital/nprobe-collector/structure"
 	"github.com/io-digital/nprobe-collector/function"
+//	"github.com/io-digital/nprobe-collector/processor"
 )
 
-type Listener int
-
-func (l *Listener) GetLine(line []byte, ack *bool) error {
-	fmt.Println(string(line))
-	return nil
-}
-
-
+type Processor int
 
 type Configuration struct {
     DbUser string
@@ -55,7 +49,7 @@ func getNProbeDB() (*sql.DB) {
 
 		fmt.Println("Opening nProbe DB")
 
-		configValues, err := ioutil.ReadFile("../config/nprobe_db_conf.json")
+		configValues, err := ioutil.ReadFile("config/nprobe_db_conf.json")
 
 		if err != nil {
 	        fmt.Println("error:", err)
@@ -93,7 +87,7 @@ func getBBarDB() (*sql.DB) {
 		//configValues := function.ParseConfiguration()
 		//fmt.Println(configValues)
 
-		configValues, err := ioutil.ReadFile("../config/bbar_db_conf.json")
+		configValues, err := ioutil.ReadFile("config/bbar_db_conf.json")
 
 		if err != nil {
 	        fmt.Println("error:", err)
@@ -201,25 +195,17 @@ func getIpAddressServiceIdMap() map[string]int {
 
 
 func init(){
-	
-	fmt.Println("init")
-	addy, err := net.ResolveTCPAddr("tcp", "0.0.0.0:42586")
-	if err != nil {
-		log.Fatal(err)
-	}
 
-	inbound, err := net.ListenTCP("tcp", addy)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	listener := new(Listener)
-	rpc.Register(listener)
-	rpc.Accept(inbound)
-	
-	/*getBBarDB()
+	getBBarDB()
 	getNProbeDB()
 
+	/*nprobeDB := getNProbeDB()
+	fmt.Println(nprobeDB)
+	tx, _ := nprobeDB.Begin()
+	stmt, _ := tx.Prepare("INSERT INTO username_service_usage (username, service_id) VALUES (?,?)")
+	stmt.Exec("rianja", 4)
+	tx.Commit()
+	*/
 	go func() {
 		t := time.NewTicker(time.Minute)
 		for {
@@ -228,14 +214,19 @@ func init(){
 		    <-t.C
 		}
 	}()
-	*/
 }
 
-func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[string][]byte){
+func (p *Processor) Test(line []byte, ack *bool) error {
+	fmt.Println(string(line))
+	return nil
+}
+
+func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack *bool) error {
 
 	nprobeDB := getNProbeDB()
 
 	var userIp string
+	flowSetHeaderStruct := processorArgs.FlowSetHeaderStruct
 	timeStamp := now.New(flowSetHeaderStruct.Timestamp)
 	hourStart := timeStamp.BeginningOfHour()
 	monthStart := timeStamp.BeginningOfMonth()
@@ -245,7 +236,7 @@ func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[s
 	stmt, _ := tx.Prepare("INSERT INTO username_service_usage (username, bytes, service_id, hour_start, month_start, updated_at) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE bytes = bytes + ?, updated_at = ?")
 
 	dataBufferLock.Lock()
-	readBuffer := dataBuffer
+	readBuffer := processorArgs.DataBuffer
 	dataBufferLock.Unlock()
 
 	for _, packet := range readBuffer {
@@ -295,7 +286,7 @@ func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[s
 				}
 			}
 
-			if found {
+			if found && false {
 				bytesTotal := function.ReadUint32(packet["IN_BYTES"]) + function.ReadUint32(packet["OUT_BYTES"])
 				stmt.Exec(userName, bytesTotal, serviceId, hourStart, monthStart, now, bytesTotal, now)
 			}
@@ -304,27 +295,29 @@ func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[s
 		}
 	}
 
+	stmt.Exec("rianja", 4)
+
 	tx.Commit()
+	*ack = true
+	return nil
 }
 
 func main(){
 
-	/*
-	addy, err := net.ResolveTCPAddr("tcp", "0.0.0.0:42586")
+	addr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:42586")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	inbound, err := net.ListenTCP("tcp", addy)
+	inbound, err := net.ListenTCP("tcp", addr)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	listener := new(Listener)
-	rpc.Register(listener)
+	processor := new(Processor)
+	rpc.Register(processor)
 	rpc.Accept(inbound)
-	*/
 
-	//for {}
+	fmt.Println("Locked and loaded")
 }
 

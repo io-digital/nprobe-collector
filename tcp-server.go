@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
+//	"os"
 	"log"
 	"net"
 	"net/rpc"
@@ -31,6 +31,7 @@ var (
 	optionDataBufferFull = make(chan bool)
 	flowSetRecord []byte
 	dataBufferLock sync.Mutex
+	client *rpc.Client
 )
 
 func readFlowSetHeader(reader *bufio.Reader, flowSetHeaderSlice []byte, flowSetHeaderStruct *structure.FlowSetHeader/*, done chan bool*/) {
@@ -67,7 +68,6 @@ func readFlowSetHeader(reader *bufio.Reader, flowSetHeaderSlice []byte, flowSetH
 		fmt.Printf("Records processed: %d\n", packetCount)
 	}
 
-	//done <- true
 	flowSetHeaderReadDone <- true
 }
 
@@ -266,10 +266,6 @@ func parseFlowSetData(flowSetData []byte) {
 	}
 }
 
-func processFlowSetData(flowSetHeaderStruct structure.FlowSetHeader, fullBuffer []map[string][]byte) {
-	//processor.ProcessData(flowSetHeaderStruct, /*dataBuffer*/fullBuffer)
-}
-
 func init(){
 
 	debugPtr := flag.Bool("debug", false, "Outputs data as it is received")
@@ -295,40 +291,27 @@ func init(){
 	
 	fmt.Println("Processor Found:", processorConfig.Name, "| Location:", processorConfig.Location)
 
-	processor := exec.Command("go", "run", processorConfig.Location)
+	processor := exec.Command(/*"go", "run", */processorConfig.Location)
 	err = processor.Start()
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Starting Processor")
+	fmt.Println("Processor started, connecting...")
 
-	time.Sleep(5000 * time.Millisecond)
+	for i := 0; i < processorConfig.ConnectionAttempts; i++ {
 
-	client, err := rpc.Dial("tcp", "localhost:"+processorConfig.TcpPort)
-	if err != nil {
-		log.Fatal(err)
-	}
+		time.Sleep(1000 * time.Millisecond)
+        fmt.Println("attempt ", i + 1)
 
-	fmt.Println("Communication with Processor Successful")
+        client, err = rpc.Dial("tcp", "localhost:"+processorConfig.TcpPort)
 
-	in := bufio.NewReader(os.Stdin)
-	for {
-
-		line, _, err := in.ReadLine()
-		fmt.Println("Reply:", line)
-		if err != nil {
-			log.Fatal(err)
+		if err == nil {
+			fmt.Println("Communication with Processor Successful")
+			break
 		}
-		var reply bool
-		err = client.Call("Listener.GetLine", line, &reply)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-
-	}
+    }
 }
 
 func main() {
@@ -381,8 +364,11 @@ func main() {
 				select {
 		        case <-dataBufferFull:
 		            
-		            fullBuffer := dataBuffer
-		            go processFlowSetData(flowSetHeader, fullBuffer)
+		            //fullBuffer := dataBuffer
+		            var reply bool
+		            processorArgs := structure.ProcessingFuncArgs{FlowSetHeaderStruct: flowSetHeader, DataBuffer: dataBuffer}
+		            //go processFlowSetData(flowSetHeader, fullBuffer)
+		            go client.Call("Processor.ProcessData", processorArgs, &reply) //go routine?
 
 		        case <-optionDataBufferFull:
 		            
