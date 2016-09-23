@@ -193,19 +193,11 @@ func getIpAddressServiceIdMap() map[string]int {
 	return returnMap
 }
 
-
 func init(){
 
 	getBBarDB()
 	getNProbeDB()
 
-	/*nprobeDB := getNProbeDB()
-	fmt.Println(nprobeDB)
-	tx, _ := nprobeDB.Begin()
-	stmt, _ := tx.Prepare("INSERT INTO username_service_usage (username, service_id) VALUES (?,?)")
-	stmt.Exec("rianja", 4)
-	tx.Commit()
-	*/
 	go func() {
 		t := time.NewTicker(time.Minute)
 		for {
@@ -286,7 +278,7 @@ func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack 
 				}
 			}
 
-			if found && false {
+			if found {
 				bytesTotal := function.ReadUint32(packet["IN_BYTES"]) + function.ReadUint32(packet["OUT_BYTES"])
 				stmt.Exec(userName, bytesTotal, serviceId, hourStart, monthStart, now, bytesTotal, now)
 			}
@@ -294,8 +286,6 @@ func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack 
 			break			
 		}
 	}
-
-	stmt.Exec("rianja", 4)
 
 	tx.Commit()
 	*ack = true
@@ -317,7 +307,5 @@ func main(){
 	processor := new(Processor)
 	rpc.Register(processor)
 	rpc.Accept(inbound)
-
-	fmt.Println("Locked and loaded")
 }
 

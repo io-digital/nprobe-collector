@@ -291,7 +291,7 @@ func init(){
 	
 	fmt.Println("Processor Found:", processorConfig.Name, "| Location:", processorConfig.Location)
 
-	processor := exec.Command(/*"go", "run", */processorConfig.Location)
+	processor := exec.Command(processorConfig.Location)
 	err = processor.Start()
 
 	if err != nil {
