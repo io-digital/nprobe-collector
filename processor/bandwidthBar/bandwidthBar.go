@@ -10,12 +10,10 @@ import (
 	"net"
 	"net/rpc"
 	"strings"
-	"sync"
 	"io/ioutil"
 	"encoding/json"
 	"github.com/io-digital/nprobe-collector/structure"
 	"github.com/io-digital/nprobe-collector/function"
-//	"github.com/io-digital/nprobe-collector/processor"
 )
 
 type Processor int
@@ -32,7 +30,6 @@ var bBarDbPtr *sql.DB
 var connectedIpUsernames map[string]string
 var ipRangeServiceIds map[string]int
 var blacklist []string
-var dataBufferLock sync.Mutex
 
 func inBlacklist(ipAddress string) bool {
     for _, b := range blacklist {
@@ -83,9 +80,6 @@ func getBBarDB() (*sql.DB) {
 	if bBarDbPtr == nil {
 
 		fmt.Println("Opening BBAR DB")
-
-		//configValues := function.ParseConfiguration()
-		//fmt.Println(configValues)
 
 		configValues, err := ioutil.ReadFile("config/bbar_db_conf.json")
 
@@ -188,8 +182,6 @@ func getIpAddressServiceIdMap() map[string]int {
 	    }
 	}
 
-	//fmt.Println(returnMap)
-
 	return returnMap
 }
 
@@ -218,8 +210,7 @@ func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack 
 	nprobeDB := getNProbeDB()
 
 	var userIp string
-	flowSetHeaderStruct := processorArgs.FlowSetHeaderStruct
-	timeStamp := now.New(flowSetHeaderStruct.Timestamp)
+	timeStamp := now.New(processorArgs.FlowSetHeaderStruct.Timestamp)
 	hourStart := timeStamp.BeginningOfHour()
 	monthStart := timeStamp.BeginningOfMonth()
 	now := time.Now()
@@ -227,11 +218,7 @@ func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack 
 	tx, _ := nprobeDB.Begin()
 	stmt, _ := tx.Prepare("INSERT INTO username_service_usage (username, bytes, service_id, hour_start, month_start, updated_at) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE bytes = bytes + ?, updated_at = ?")
 
-	dataBufferLock.Lock()
-	readBuffer := processorArgs.DataBuffer
-	dataBufferLock.Unlock()
-
-	for _, packet := range readBuffer {
+	for _, packet := range processorArgs.DataBuffer {
 
 		userIp = ""
 
@@ -263,18 +250,13 @@ func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack 
 
 			if !found {
 
-				fmt.Println("Not Found: ", userIp)
 				userName, err := getUserName(userIp)
 
 				if err == nil {
-					fmt.Println("Found!: ", userName)
 					found = true
 					connectedIpUsernames[userIp] = userName
-
 				}else{
-
 					blacklist = append(blacklist, userIp)
-					fmt.Println(blacklist)
 				}
 			}
 

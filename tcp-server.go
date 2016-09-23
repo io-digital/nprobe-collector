@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-//	"os"
 	"log"
 	"net"
 	"net/rpc"
@@ -316,8 +315,6 @@ func init(){
 
 func main() {
 
-	
-
 	flowSetHeaderSlice := make([]byte, 20)
 	flowSetHeader := structure.FlowSetHeader{}
 
@@ -336,6 +333,8 @@ func main() {
 	reader := bufio.NewReader(conn)
 
 	fmt.Println("Listening on and accepting connections on port 2055...")
+
+	tempRes := make(chan *rpc.Call, 100)
 
 	for {
 
@@ -363,13 +362,10 @@ func main() {
 
 				select {
 		        case <-dataBufferFull:
-		            
-		            //fullBuffer := dataBuffer
-		            var reply bool
-		            processorArgs := structure.ProcessingFuncArgs{FlowSetHeaderStruct: flowSetHeader, DataBuffer: dataBuffer}
-		            //go processFlowSetData(flowSetHeader, fullBuffer)
-		            go client.Call("Processor.ProcessData", processorArgs, &reply) //go routine?
 
+		            var reply bool
+		            //go client.Call("Processor.ProcessData", structure.ProcessingFuncArgs{FlowSetHeaderStruct: flowSetHeader, DataBuffer: dataBuffer}, &reply)
+		            client.Go("Processor.ProcessData", structure.ProcessingFuncArgs{FlowSetHeaderStruct: flowSetHeader, DataBuffer: dataBuffer}, &reply, tempRes)
 		        case <-optionDataBufferFull:
 		            
 		            //skryf data
