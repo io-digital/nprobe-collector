@@ -12,11 +12,16 @@ type DbConfiguration struct {
     DbPort string
 }
 
-type ProcessorConfiguration struct {
+type Processor struct {
 	Name string
 	Location string
 	TcpPort string
 	ConnectionAttempts int
+}
+
+type ProcessorConfiguration struct {
+	ServerPort string
+	Processors []Processor
 }
 
 type ProcessingFuncArgs struct {

@@ -1,9 +1,13 @@
 package function
 
 import (
+	"log"
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
+	"encoding/json"
+	"github.com/io-digital/nprobe-collector/structure"
 )
 
 func PrintData(buffer []byte) {
@@ -31,7 +35,38 @@ func ReadUint64(data []byte) (ret uint64) {
 	return
 }
 
-func ParseConfiguration() (string){
+func GetDbConfig(fileLocation string) (structure.DbConfiguration) {
 
-	return "test"
+	configValues, err := ioutil.ReadFile(fileLocation)
+
+	if err != nil {
+        log.Fatal("Processor error:", err)
+    }
+
+	dbConfig := structure.DbConfiguration{}
+
+	err = json.Unmarshal(configValues, &dbConfig)
+    if err != nil {
+        log.Fatal("Processor error:", err)
+    }
+
+    return dbConfig
+}
+
+func GetProcessorConfig() (structure.ProcessorConfiguration) {
+
+	configValues, err := ioutil.ReadFile("config/processor.json")
+
+	if err != nil {
+        log.Fatal("Processor error:", err)
+    }
+
+	processorConfig := structure.ProcessorConfiguration{}
+
+	err = json.Unmarshal(configValues, &processorConfig)
+    if err != nil {
+        log.Fatal("Processor error:", err)
+    }
+
+    return processorConfig
 }

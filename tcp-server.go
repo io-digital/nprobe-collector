@@ -11,9 +11,7 @@ import (
 	"math"
 	"time"
 	"sync"
-	"io/ioutil"
 	"os/exec"
-	"encoding/json"
 	"github.com/io-digital/nprobe-collector/structure"
 	"github.com/io-digital/nprobe-collector/function"
 )
@@ -30,7 +28,7 @@ var (
 	optionDataBufferFull = make(chan bool)
 	flowSetRecord []byte
 	dataBufferLock sync.Mutex
-	client *rpc.Client
+	rpcClients []*rpc.Client
 )
 
 func readFlowSetHeader(reader *bufio.Reader, flowSetHeaderSlice []byte, flowSetHeaderStruct *structure.FlowSetHeader/*, done chan bool*/) {
@@ -274,43 +272,42 @@ func init(){
 
 	fmt.Println("Launching TCP server...")
 
-	//Initialize processor 
-	configValues, err := ioutil.ReadFile("config/processor.json")
-
-	if err != nil {
-        log.Fatal("Processor error:", err)
-    }
+	//Initialize processors
+	processorConfig := function.GetProcessorConfig()
 	
-	processorConfig := structure.ProcessorConfiguration{}
+	for _, processor := range processorConfig.Processors {
 
-	err = json.Unmarshal(configValues, &processorConfig)
-    if err != nil {
-        fmt.Println("error:", err)
-    }
-	
-	fmt.Println("Processor Found:", processorConfig.Name, "| Location:", processorConfig.Location)
+		fmt.Println("Processor Found:", processor.Name, "| Location:", processor.Location)
+		var processStarted = false
 
-	processor := exec.Command(processorConfig.Location)
-	err = processor.Start()
+		processorCmd := exec.Command(processor.Location)
+		err := processorCmd.Start()
 
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Println("Processor started, connecting...")
-
-	for i := 0; i < processorConfig.ConnectionAttempts; i++ {
-
-		time.Sleep(1000 * time.Millisecond)
-        fmt.Println("attempt ", i + 1)
-
-        client, err = rpc.Dial("tcp", "localhost:"+processorConfig.TcpPort)
-
-		if err == nil {
-			fmt.Println("Communication with Processor Successful")
-			break
+		if err != nil {
+			log.Fatal(err)
 		}
-    }
+
+		fmt.Println("Processor started, connecting...")
+
+		for i := 0; i < processor.ConnectionAttempts; i++ {
+
+			time.Sleep(1000 * time.Millisecond)
+	        fmt.Println("attempt ", i + 1)
+
+	        client, err := rpc.Dial("tcp", "localhost:"+processor.TcpPort)
+
+			if err == nil {
+				rpcClients = append(rpcClients, client)
+				processStarted = true
+				fmt.Println("Communication with Processor Successful")
+				break
+			}
+	    }
+
+	    if !processStarted {
+	    	fmt.Println("Could not establish communication with processor", processor.Name)
+	    }
+	}
 }
 
 func main() {
@@ -363,9 +360,11 @@ func main() {
 				select {
 		        case <-dataBufferFull:
 
-		            var reply bool
-		            //go client.Call("Processor.ProcessData", structure.ProcessingFuncArgs{FlowSetHeaderStruct: flowSetHeader, DataBuffer: dataBuffer}, &reply)
-		            client.Go("Processor.ProcessData", structure.ProcessingFuncArgs{FlowSetHeaderStruct: flowSetHeader, DataBuffer: dataBuffer}, &reply, tempRes)
+		        	for _, client := range rpcClients {
+		        		var reply bool
+		        		client.Go("Processor.ProcessData", structure.ProcessingFuncArgs{FlowSetHeaderStruct: flowSetHeader, DataBuffer: dataBuffer}, &reply, tempRes)
+		        	}
+		            
 		        case <-optionDataBufferFull:
 		            
 		            //skryf data

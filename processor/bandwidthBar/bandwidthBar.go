@@ -10,20 +10,11 @@ import (
 	"net"
 	"net/rpc"
 	"strings"
-	"io/ioutil"
-	"encoding/json"
 	"github.com/io-digital/nprobe-collector/structure"
 	"github.com/io-digital/nprobe-collector/function"
 )
 
 type Processor int
-
-type Configuration struct {
-    DbUser string
-    DbPassword string
-    DbName string
-    DbHost string
-}
 
 var nProbeDbPtr *sql.DB
 var bBarDbPtr *sql.DB
@@ -46,17 +37,7 @@ func getNProbeDB() (*sql.DB) {
 
 		fmt.Println("Opening nProbe DB")
 
-		configValues, err := ioutil.ReadFile("config/nprobe_db_conf.json")
-
-		if err != nil {
-	        fmt.Println("error:", err)
-	    }
-		configuration := Configuration{}
-
-		err = json.Unmarshal(configValues, &configuration)
-	    if err != nil {
-	        fmt.Println("error:", err)
-	    }
+		configuration := function.GetDbConfig("config/nprobe_db_conf.json")
 
 	    connectionStr := configuration.DbUser+":"+configuration.DbPassword+"@/"+configuration.DbName+"?loc=Africa%2FJohannesburg"
 		nProbeDb, err := sql.Open("mysql", connectionStr)
@@ -80,18 +61,7 @@ func getBBarDB() (*sql.DB) {
 	if bBarDbPtr == nil {
 
 		fmt.Println("Opening BBAR DB")
-
-		configValues, err := ioutil.ReadFile("config/bbar_db_conf.json")
-
-		if err != nil {
-	        fmt.Println("error:", err)
-	    }
-		configuration := Configuration{}
-
-		err = json.Unmarshal(configValues, &configuration)
-	    if err != nil {
-	        fmt.Println("error:", err)
-	    }
+		configuration := function.GetDbConfig("config/bbar_db_conf.json")
 
 		connectionStr := configuration.DbUser+":"+configuration.DbPassword+"@tcp("+configuration.DbHost+":3306)/"+configuration.DbName
 		bbarDb, err := sql.Open("mysql", connectionStr)
