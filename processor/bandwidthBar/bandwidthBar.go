@@ -1,4 +1,4 @@
-package processor
+package main
 
 import (
 	"log"
@@ -8,27 +8,19 @@ import (
 	"time"
 	"github.com/jinzhu/now"
 	"net"
+	"net/rpc"
 	"strings"
-	"sync"
-	"io/ioutil"
-	"encoding/json"
 	"github.com/io-digital/nprobe-collector/structure"
 	"github.com/io-digital/nprobe-collector/function"
 )
 
-type Configuration struct {
-    DbUser string
-    DbPassword string
-    DbName string
-    DbHost string
-}
+type Processor int
 
 var nProbeDbPtr *sql.DB
 var bBarDbPtr *sql.DB
 var connectedIpUsernames map[string]string
 var ipRangeServiceIds map[string]int
 var blacklist []string
-var dataBufferLock sync.Mutex
 
 func inBlacklist(ipAddress string) bool {
     for _, b := range blacklist {
@@ -45,17 +37,7 @@ func getNProbeDB() (*sql.DB) {
 
 		fmt.Println("Opening nProbe DB")
 
-		configValues, err := ioutil.ReadFile("../processor/bandwidthBar/nprobe_db_conf.json")
-
-		if err != nil {
-	        fmt.Println("error:", err)
-	    }
-		configuration := Configuration{}
-
-		err = json.Unmarshal(configValues, &configuration)
-	    if err != nil {
-	        fmt.Println("error:", err)
-	    }
+		configuration := function.GetDbConfig("config/nprobe_db_conf.json")
 
 	    connectionStr := configuration.DbUser+":"+configuration.DbPassword+"@/"+configuration.DbName+"?loc=Africa%2FJohannesburg"
 		nProbeDb, err := sql.Open("mysql", connectionStr)
@@ -79,18 +61,7 @@ func getBBarDB() (*sql.DB) {
 	if bBarDbPtr == nil {
 
 		fmt.Println("Opening BBAR DB")
-
-		configValues, err := ioutil.ReadFile("../processor/bandwidthBar/bbar_db_conf.json")
-
-		if err != nil {
-	        fmt.Println("error:", err)
-	    }
-		configuration := Configuration{}
-
-		err = json.Unmarshal(configValues, &configuration)
-	    if err != nil {
-	        fmt.Println("error:", err)
-	    }
+		configuration := function.GetDbConfig("config/bbar_db_conf.json")
 
 		connectionStr := configuration.DbUser+":"+configuration.DbPassword+"@tcp("+configuration.DbHost+":3306)/"+configuration.DbName
 		bbarDb, err := sql.Open("mysql", connectionStr)
@@ -181,12 +152,10 @@ func getIpAddressServiceIdMap() map[string]int {
 	    }
 	}
 
-	//fmt.Println(returnMap)
-
 	return returnMap
 }
 
-func Initialize(){
+func init(){
 
 	getBBarDB()
 	getNProbeDB()
@@ -201,12 +170,17 @@ func Initialize(){
 	}()
 }
 
-func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[string][]byte){
+func (p *Processor) Test(line []byte, ack *bool) error {
+	fmt.Println(string(line))
+	return nil
+}
+
+func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack *bool) error {
 
 	nprobeDB := getNProbeDB()
 
 	var userIp string
-	timeStamp := now.New(flowSetHeaderStruct.Timestamp)
+	timeStamp := now.New(processorArgs.FlowSetHeaderStruct.Timestamp)
 	hourStart := timeStamp.BeginningOfHour()
 	monthStart := timeStamp.BeginningOfMonth()
 	now := time.Now()
@@ -214,12 +188,7 @@ func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[s
 	tx, _ := nprobeDB.Begin()
 	stmt, _ := tx.Prepare("INSERT INTO username_service_usage (username, bytes, service_id, hour_start, month_start, updated_at) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE bytes = bytes + ?, updated_at = ?")
 
-	dataBufferLock.Lock()
-	readBuffer := dataBuffer
-	dataBufferLock.Unlock()
-
-	for _, packet := range readBuffer {
-	//for _, packet := range dataBuffer {
+	for _, packet := range processorArgs.DataBuffer {
 
 		userIp = ""
 
@@ -251,18 +220,13 @@ func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[s
 
 			if !found {
 
-				fmt.Println("Not Found: ", userIp)
 				userName, err := getUserName(userIp)
 
 				if err == nil {
-					fmt.Println("Found!: ", userName)
 					found = true
 					connectedIpUsernames[userIp] = userName
-
 				}else{
-
 					blacklist = append(blacklist, userIp)
-					fmt.Println(blacklist)
 				}
 			}
 
@@ -276,5 +240,24 @@ func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[s
 	}
 
 	tx.Commit()
+	*ack = true
+	return nil
+}
+
+func main(){
+
+	addr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:42586")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	inbound, err := net.ListenTCP("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	processor := new(Processor)
+	rpc.Register(processor)
+	rpc.Accept(inbound)
 }
 

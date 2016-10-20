@@ -4,6 +4,31 @@ import (
 	"time"
 )
 
+type DbConfiguration struct {
+    DbUser string
+    DbPassword string
+    DbName string
+    DbHost string
+    DbPort string
+}
+
+type Processor struct {
+	Name string
+	Location string
+	TcpPort string
+	ConnectionAttempts int
+}
+
+type ProcessorConfiguration struct {
+	ServerPort string
+	Processors []Processor
+}
+
+type ProcessingFuncArgs struct {
+	FlowSetHeaderStruct FlowSetHeader
+	DataBuffer []map[string][]byte
+}
+
 type FlowSetHeader struct {
 	Version uint16
 	Records uint16

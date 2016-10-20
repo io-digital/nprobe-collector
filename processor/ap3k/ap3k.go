@@ -1,4 +1,4 @@
-package processor
+package main
 
 import (
 	"log"
@@ -7,12 +7,15 @@ import (
 	"os"
 	"fmt"
 	"net"
+	"net/rpc"
 	"strconv"
 	"io/ioutil"
 	"encoding/json"
 	"github.com/io-digital/nprobe-collector/structure"
 	"github.com/io-digital/nprobe-collector/function"
 )
+
+type Processor int
 
 type DataUsage struct {
 	Total uint32
@@ -38,7 +41,7 @@ func getAp3kDB() (*sql.DB) {
 
 		fmt.Println("Opening AP3K Database")
 
-		configValues, err := ioutil.ReadFile("../processor/ap3k/ap3k_db_conf.json")
+		configValues, err := ioutil.ReadFile("config/ap3k_db_conf.json")
 
 		if err != nil {
 	        fmt.Println("error:", err)
@@ -67,9 +70,9 @@ func getAp3kDB() (*sql.DB) {
 	return ap3kDbPtr
 }
 
-func Initialize(){
+func init(){
 
-	domains, err := ioutil.ReadFile("../processor/ap3k/wechat_ip_domain.json")
+	domains, err := ioutil.ReadFile("processor/ap3k/wechat_ip_domain.json")
 
 	if err != nil {
 		fmt.Println("error:", err)
@@ -107,11 +110,11 @@ func Initialize(){
     fmt.Printf("AP3K Traffic Data Processor initialised: %d IP ranges loaded, %d domains loaded \n", i, j)
 }
 
-func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[string][]byte){
+func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack *bool) error {
 
 	var userIp string
 
-	for _, packet := range dataBuffer {
+	for _, packet := range processorArgs.DataBuffer {
 
 		IPV4_SRC_ADDR, srcPresent := packet["IPV4_SRC_ADDR"]
 		IPV4_DST_ADDR, dstPresent := packet["IPV4_DST_ADDR"]
@@ -165,4 +168,23 @@ func ProcessData(flowSetHeaderStruct structure.FlowSetHeader, dataBuffer []map[s
 			}
 		}
 	}
+
+	*ack = true
+	return nil
+}
+
+func main() {
+	addr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:42587")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	inbound, err := net.ListenTCP("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	processor := new(Processor)
+	rpc.Register(processor)
+	rpc.Accept(inbound)
 }
