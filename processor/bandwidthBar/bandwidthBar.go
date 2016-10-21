@@ -37,7 +37,7 @@ func getNProbeDB() (*sql.DB) {
 
 		fmt.Println("Opening nProbe DB")
 
-		configuration := function.GetDbConfig("config/nprobe_db_conf.json")
+		configuration := function.GetDbConfig("nprobe_db_conf.json")
 
 	    connectionStr := configuration.DbUser+":"+configuration.DbPassword+"@/"+configuration.DbName+"?loc=Africa%2FJohannesburg"
 		nProbeDb, err := sql.Open("mysql", connectionStr)
@@ -61,7 +61,7 @@ func getBBarDB() (*sql.DB) {
 	if bBarDbPtr == nil {
 
 		fmt.Println("Opening BBAR DB")
-		configuration := function.GetDbConfig("config/bbar_db_conf.json")
+		configuration := function.GetDbConfig("bbar_db_conf.json")
 
 		connectionStr := configuration.DbUser+":"+configuration.DbPassword+"@tcp("+configuration.DbHost+":3306)/"+configuration.DbName
 		bbarDb, err := sql.Open("mysql", connectionStr)
@@ -168,6 +168,8 @@ func init(){
 		    <-t.C
 		}
 	}()
+
+
 }
 
 func (p *Processor) Test(line []byte, ack *bool) error {
@@ -246,7 +248,9 @@ func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack 
 
 func main(){
 
-	addr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:42586")
+	processorConfig := function.GetProcessorConfig("../../config/processor.json")
+
+	addr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:"+processorConfig.ServerPort)
 	if err != nil {
 		log.Fatal(err)
 	}

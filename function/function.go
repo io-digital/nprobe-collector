@@ -53,9 +53,9 @@ func GetDbConfig(fileLocation string) (structure.DbConfiguration) {
     return dbConfig
 }
 
-func GetProcessorConfig() (structure.ProcessorConfiguration) {
+func GetProcessorConfig(fileLocation string) (structure.ProcessorConfiguration) {
 
-	configValues, err := ioutil.ReadFile("config/processor.json")
+	configValues, err := ioutil.ReadFile(fileLocation)
 
 	if err != nil {
         log.Fatal("Processor error:", err)

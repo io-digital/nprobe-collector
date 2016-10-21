@@ -11,7 +11,7 @@ import (
 	"math"
 	"time"
 	"sync"
-	"os/exec"
+//	"os/exec"
 	"github.com/io-digital/nprobe-collector/structure"
 	"github.com/io-digital/nprobe-collector/function"
 )
@@ -273,19 +273,26 @@ func init(){
 	fmt.Println("Launching TCP server...")
 
 	//Initialize processors
-	processorConfig := function.GetProcessorConfig()
+	processorConfig := function.GetProcessorConfig("config/processor.json")
 	
 	for _, processor := range processorConfig.Processors {
 
 		fmt.Println("Processor Found:", processor.Name, "| Location:", processor.Location)
+
+		client, err := rpc.Dial("tcp", "localhost:"+processor.TcpPort)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+		
+		rpcClients = append(rpcClients, client)
+		/*
 		var processStarted = false
 
 		processorCmd := exec.Command(processor.Location)
 		err := processorCmd.Start()
 
-		if err != nil {
-			log.Fatal(err)
-		}
+		
 
 		fmt.Println("Processor started, connecting...")
 
@@ -307,6 +314,7 @@ func init(){
 	    if !processStarted {
 	    	fmt.Println("Could not establish communication with processor", processor.Name)
 	    }
+	    */
 	}
 }
 
