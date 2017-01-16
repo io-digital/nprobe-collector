@@ -278,7 +278,23 @@ func init(){
 	for _, processor := range processorConfig.Processors {
 
 		fmt.Println("Processor Found:", processor.Name, "| Location:", processor.Location)
+		var i = 1;
 
+		for {
+			client, err := rpc.Dial("tcp", "localhost:"+processor.TcpPort)
+
+			if err != nil {
+				time.Sleep(1000 * time.Millisecond)
+	        	fmt.Println("attempt ", i)
+	        	i++
+			} else {
+				rpcClients = append(rpcClients, client)
+				fmt.Println("Communication with Processor Successful")
+				break;
+			}
+		}
+
+		/*
 		client, err := rpc.Dial("tcp", "localhost:"+processor.TcpPort)
 
 		if err != nil {
@@ -286,6 +302,8 @@ func init(){
 		}
 		
 		rpcClients = append(rpcClients, client)
+		*/
+
 		/*
 		var processStarted = false
 

@@ -145,6 +145,10 @@ func getIpAddressServiceIdMap() map[string]int {
 
 	    for _, ipAddress := range ipAddressSlice {
 
+	    	if ipAddress == ""{
+	    		continue;
+	    	} 
+
 	    	if !strings.Contains(string(ipAddress), "/") {
 	    		ipAddress += "/32"
 	    	}
@@ -168,8 +172,6 @@ func init(){
 		    <-t.C
 		}
 	}()
-
-
 }
 
 func (p *Processor) Test(line []byte, ack *bool) error {
@@ -198,7 +200,7 @@ func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack 
 		IPV4_DST_ADDR, dstPresent := packet["IPV4_DST_ADDR"]
 		
 		if !srcPresent || !dstPresent {
-			continue;
+			continue
 		}
 
 		srcAddr := net.IPv4(IPV4_SRC_ADDR[0], IPV4_SRC_ADDR[1], IPV4_SRC_ADDR[2], IPV4_SRC_ADDR[3])
@@ -206,7 +208,12 @@ func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack 
 
 		for ipRange, serviceId := range ipRangeServiceIds {
 
-			_, ipnet, _ := net.ParseCIDR(ipRange)
+			_, ipnet, err := net.ParseCIDR(ipRange)
+
+			if err != nil{
+				fmt.Println("Error: ", err)
+				continue
+			}
 
 			if ipnet.Contains(srcAddr) {
 				userIp = dstAddr.String()
