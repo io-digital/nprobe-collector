@@ -36,21 +36,20 @@ func getNProbeDB() (*sql.DB) {
 	if nProbeDbPtr == nil {
 
 		fmt.Println("Opening nProbe DB")
-
-		configuration := function.GetDbConfig("config/nprobe_db_conf.json")
+		configuration := function.GetDbConfig("nprobe_db_conf.json")
 
 	    connectionStr := configuration.DbUser+":"+configuration.DbPassword+"@/"+configuration.DbName+"?loc=Africa%2FJohannesburg"
 		nProbeDb, err := sql.Open("mysql", connectionStr)
 
 		if err != nil {
-		    log.Fatalf("nProbe DB Error: %s", err)
+		    fmt.Println("nProbe DB Connect Error: %s", err)
 		}
 
 		nProbeDbPtr = nProbeDb
 	}
 
 	if err := nProbeDbPtr.Ping(); err != nil {
-	  	log.Fatalf("nProbe DB Error: %s", err)
+	  	fmt.Println("nProbe DB Ping Error: ", err)
 	}
 
 	return nProbeDbPtr
@@ -61,20 +60,20 @@ func getBBarDB() (*sql.DB) {
 	if bBarDbPtr == nil {
 
 		fmt.Println("Opening BBAR DB")
-		configuration := function.GetDbConfig("config/bbar_db_conf.json")
+		configuration := function.GetDbConfig("bbar_db_conf.json")
 
 		connectionStr := configuration.DbUser+":"+configuration.DbPassword+"@tcp("+configuration.DbHost+":3306)/"+configuration.DbName
 		bbarDb, err := sql.Open("mysql", connectionStr)
 
 		if err != nil {
-		    log.Fatal(err)
+		    fmt.Println("BBAR DB Connect Error: ", err)
 		}
 
 		bBarDbPtr = bbarDb
 	}
 
 	if err := bBarDbPtr.Ping(); err != nil {
-	  	log.Fatal(err)
+		fmt.Println("BBAR DB Ping Error: ", err)
 	}
 
 	return bBarDbPtr
@@ -88,24 +87,24 @@ func getIpAddressUsernameMap() map[string]string {
 	var FramedIPAddress string
 
 	bbardb := getBBarDB()
-		
+
 	rows, err := bbardb.Query("SELECT UserName, FramedIPAddress FROM radacct WHERE AcctStopTime IS NULL")
 
 	if err != nil {
-	    log.Fatal(err)
+	    fmt.Println("BBAR DB Error getting Username/IP: ", err)
+	    return returnMap
 	}
 
 	for rows.Next() {
 
 		if err := rows.Scan(&UserName, &FramedIPAddress); err != nil {
-	        log.Fatal(err)
+	        fmt.Println("BBAR DB Error reading next line: ", err)
 	    }else if strings.Trim(FramedIPAddress, " ") != "" && strings.Trim(UserName, " ") != "" {
 	    	returnMap[FramedIPAddress] = UserName
 	    }
 	}
 
 	fmt.Println("Users connected: ", len(returnMap))
-
 	return returnMap
 }
 
@@ -128,27 +127,32 @@ func getIpAddressServiceIdMap() map[string]int {
 	var ipAddresses string
 
 	bbardb := getBBarDB()
-		
+
 	rows, err := bbardb.Query("SELECT id as service_id, ip_addresses FROM bandwidth_services WHERE ip_addresses IS NOT NULL")
 
 	if err != nil {
-	    log.Fatal(err)
+	    fmt.Println("BBAR DB Error getting Service/IP: ", err)
+	    return returnMap
 	}
 
 	for rows.Next() {
 
 		if err := rows.Scan(&serviceId, &ipAddresses); err != nil {
-	        log.Fatal(err)
-	    }
+	        fmt.Println("BBAR DB Error reading next line: ", err)
+	    }else{
+	    	ipAddressSlice := strings.Split(ipAddresses, ";")
 
-	    ipAddressSlice := strings.Split(ipAddresses, ";")
+		    for _, ipAddress := range ipAddressSlice {
 
-	    for _, ipAddress := range ipAddressSlice {
+		    	if ipAddress == ""{
+		    		continue;
+		    	} 
 
-	    	if !strings.Contains(string(ipAddress), "/") {
-	    		ipAddress += "/32"
-	    	}
-	    	returnMap[string(ipAddress)] = serviceId
+		    	if !strings.Contains(string(ipAddress), "/") {
+		    		ipAddress += "/32"
+		    	}
+		    	returnMap[string(ipAddress)] = serviceId
+		    }
 	    }
 	}
 
@@ -185,7 +189,13 @@ func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack 
 	monthStart := timeStamp.BeginningOfMonth()
 	now := time.Now()
 
-	tx, _ := nprobeDB.Begin()
+	tx, err := nprobeDB.Begin()
+
+	if err != nil {
+		fmt.Println("nProbe DB Transaction Error: ", err)
+		*ack = true
+		return nil
+	}
 	stmt, _ := tx.Prepare("INSERT INTO username_service_usage (username, bytes, service_id, hour_start, month_start, updated_at) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE bytes = bytes + ?, updated_at = ?")
 
 	for _, packet := range processorArgs.DataBuffer {
@@ -196,7 +206,7 @@ func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack 
 		IPV4_DST_ADDR, dstPresent := packet["IPV4_DST_ADDR"]
 		
 		if !srcPresent || !dstPresent {
-			continue;
+			continue
 		}
 
 		srcAddr := net.IPv4(IPV4_SRC_ADDR[0], IPV4_SRC_ADDR[1], IPV4_SRC_ADDR[2], IPV4_SRC_ADDR[3])
@@ -204,7 +214,12 @@ func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack 
 
 		for ipRange, serviceId := range ipRangeServiceIds {
 
-			_, ipnet, _ := net.ParseCIDR(ipRange)
+			_, ipnet, err := net.ParseCIDR(ipRange)
+
+			if err != nil{
+				fmt.Println("Error: ", err)
+				continue
+			}
 
 			if ipnet.Contains(srcAddr) {
 				userIp = dstAddr.String()
@@ -246,7 +261,9 @@ func (p *Processor) ProcessData(processorArgs structure.ProcessingFuncArgs, ack 
 
 func main(){
 
-	addr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:42586")
+	processorConfig := function.GetProcessorConfig("../../config/processor.json")
+
+	addr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:"+processorConfig.ServerPort)
 	if err != nil {
 		log.Fatal(err)
 	}

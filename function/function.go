@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
+	"time"
 	"encoding/json"
 	"github.com/io-digital/nprobe-collector/structure"
 )
@@ -53,9 +54,9 @@ func GetDbConfig(fileLocation string) (structure.DbConfiguration) {
     return dbConfig
 }
 
-func GetProcessorConfig() (structure.ProcessorConfiguration) {
+func GetProcessorConfig(fileLocation string) (structure.ProcessorConfiguration) {
 
-	configValues, err := ioutil.ReadFile("config/processor.json")
+	configValues, err := ioutil.ReadFile(fileLocation)
 
 	if err != nil {
         log.Fatal("Processor error:", err)
@@ -69,4 +70,8 @@ func GetProcessorConfig() (structure.ProcessorConfiguration) {
     }
 
     return processorConfig
+}
+
+func SleepForSeconds(seconds time.Duration) {
+	time.Sleep(seconds * 1000 * time.Millisecond)
 }
