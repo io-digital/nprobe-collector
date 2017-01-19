@@ -44,7 +44,10 @@ func readFlowSetHeader(reader *bufio.Reader, flowSetHeaderSlice []byte, flowSetH
 
 		} else if err == io.EOF {
 			fmt.Printf("Number of Packets: %d\n", packetCount)
-			log.Fatalf("Unexpected Error: %s", err)
+			fmt.Printf("Unexpected Error - readFlowSetHeader: %s", err)
+			//flowSetHeaderSlice = nil
+			flowSetHeaderReadDone <- false
+			return
 		} else {
 			fmt.Println("Waiting for data")
 		}
@@ -73,7 +76,10 @@ func readFlowSetRecord(reader *bufio.Reader, flowSetRecord *[]byte) {
 	flowSetIdLength, err := reader.Peek(4)
 
 	if err != nil {
-		log.Fatalf("Unexpected Error: %s", err)
+		fmt.Printf("Unexpected Error - readFlowSetRecord: %s", err)
+		*flowSetRecord = nil
+		flowSetRecordReadDone <- false
+		return
 	}
 
 	flowSetLength := int(function.ReadUint16(flowSetIdLength[2:4]))
@@ -94,7 +100,6 @@ func readFlowSetRecord(reader *bufio.Reader, flowSetRecord *[]byte) {
 		}
 	}
 
-	//done <- true
 	flowSetRecordReadDone <- true
 }
 
@@ -263,17 +268,10 @@ func parseFlowSetData(flowSetData []byte) {
 	}
 }
 
-func init(){
+func startProcessors(){
 
-	debugPtr := flag.Bool("debug", false, "Outputs data as it is received")
-	flag.Parse()
-
-	debugMode = *debugPtr
-
-	fmt.Println("Launching TCP server...")
-
-	//Initialize processors
 	processorConfig := function.GetProcessorConfig("config/processor.json")
+	rpcClients = nil
 	
 	for _, processor := range processorConfig.Processors {
 
@@ -293,47 +291,20 @@ func init(){
 				break;
 			}
 		}
-
-		/*
-		client, err := rpc.Dial("tcp", "localhost:"+processor.TcpPort)
-
-		if err != nil {
-			log.Fatal(err)
-		}
-		
-		rpcClients = append(rpcClients, client)
-		*/
-
-		/*
-		var processStarted = false
-
-		processorCmd := exec.Command(processor.Location)
-		err := processorCmd.Start()
-
-		
-
-		fmt.Println("Processor started, connecting...")
-
-		for i := 0; i < processor.ConnectionAttempts; i++ {
-
-			time.Sleep(1000 * time.Millisecond)
-	        fmt.Println("attempt ", i + 1)
-
-	        client, err := rpc.Dial("tcp", "localhost:"+processor.TcpPort)
-
-			if err == nil {
-				rpcClients = append(rpcClients, client)
-				processStarted = true
-				fmt.Println("Communication with Processor Successful")
-				break
-			}
-	    }
-
-	    if !processStarted {
-	    	fmt.Println("Could not establish communication with processor", processor.Name)
-	    }
-	    */
 	}
+}
+
+func init(){
+
+	debugPtr := flag.Bool("debug", false, "Outputs data as it is received")
+	flag.Parse()
+
+	debugMode = *debugPtr
+
+	fmt.Println("Launching TCP server...")
+
+	//Initialize processors
+	startProcessors()
 }
 
 func main() {
@@ -346,7 +317,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("TCP Error: %s", err)
 	}
+	
 
+	
 	conn, err := ln.Accept()
 
 	if err != nil {
@@ -354,8 +327,9 @@ func main() {
 	}
 
 	reader := bufio.NewReader(conn)
-
+	
 	fmt.Println("Listening on and accepting connections on port 2055...")
+
 
 	tempRes := make(chan *rpc.Call, 100)
 
@@ -388,7 +362,11 @@ func main() {
 
 		        	for _, client := range rpcClients {
 		        		var reply bool
-		        		client.Go("Processor.ProcessData", structure.ProcessingFuncArgs{FlowSetHeaderStruct: flowSetHeader, DataBuffer: dataBuffer}, &reply, tempRes)
+		        		callResult := client.Go("Processor.ProcessData", structure.ProcessingFuncArgs{FlowSetHeaderStruct: flowSetHeader, DataBuffer: dataBuffer}, &reply, tempRes)
+		        		
+		        		if callResult.Error != nil {
+		        			startProcessors()
+		        		}
 		        	}
 		            
 		        case <-optionDataBufferFull:

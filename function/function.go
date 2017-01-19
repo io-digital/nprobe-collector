@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
+	"time"
 	"encoding/json"
 	"github.com/io-digital/nprobe-collector/structure"
 )
@@ -69,4 +70,8 @@ func GetProcessorConfig(fileLocation string) (structure.ProcessorConfiguration) 
     }
 
     return processorConfig
+}
+
+func SleepForSeconds(seconds time.Duration) {
+	time.Sleep(seconds * 1000 * time.Millisecond)
 }
